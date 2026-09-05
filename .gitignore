@@ -1,0 +1,19 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Runtime and local tooling
+node_modules/
+*.log
+*.pid
+.DS_Store
+Thumbs.db
+
+# Internal planning records (not part of the public submission)
+NEXT_IMPLEMENTATION_PLAN.md
+FUTURE_AGENT_PAYMENT_AIRLOCK.md
+SECURITY_AIRLOCK_DESIGN.md
+MCP_CONTRACT.md
