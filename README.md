@@ -10,15 +10,15 @@ Most AI ordering systems put the restaurant's AI in front of you. Clover flips i
 
 **Private preferences and conversations stay with the customer's AI. The restaurant side receives only the table, items, options, and confirmation result required for the order.**
 
-## Hackathon Cross-AI Demo (Completed Live)
+## Cross-AI Flow
 
-The following cross-AI flow was completed in a live test:
+The session-bound flow is:
 
 1. An external AI, separate from the restaurant system, received a session-bound Agent URL
 2. The external AI called `GET /api/menu?lang=zh` and read the full menu
 3. It called `POST /api/drafts` and created a draft bound to that session
 4. It reported the items and server-calculated total to the user
-5. The user opened the `reviewUrl`, reviewed the order, and confirmed it
+5. The draft appeared on the original Clover ordering screen, where the user reviewed and confirmed it
 6. The simulated restaurant order was created, and the original ordering screen displayed the order number and status
 
 **This demonstrates that an external AI with network access and HTTP/JSON tools can help create an order draft without receiving payment data or the user's private conversation.**
@@ -46,10 +46,11 @@ Customer's Personal AI (e.g., Claude, GPT, Gemini)
 │  POST /api/drafts         create order draft     │
 │  GET  /api/drafts/:id     query draft status     │
 │  GET  /api/orders/:id     query confirmed order  │
-│  GET  /review?draft=&token=  human confirm page  │
+│  POST /api/agent-sessions/:id/confirm            │
+│                           same-screen confirmation│
 └──────────────────────────────────────────────────┘
         │
-        │  Human taps confirm (review page)
+        │  Human taps confirm (original screen)
         ▼
    Simulated order accepted  →  status: "準備中"
 ```
@@ -129,6 +130,7 @@ Content-Type: application/json
   "menuVersion": "2026-09-05-v1",
   "table": "1",
   "language": "zh",
+  "sessionId": "S_...",
   "lines": [
     { "itemId": 5, "quantity": 1, "optionKeys": [] },
     { "itemId": 6, "quantity": 1, "optionKeys": ["sugar0", "iceNone"] }
@@ -141,8 +143,10 @@ Content-Type: application/json
 - `lines` — itemized with **server-calculated** prices (agent cannot set prices)
 - `total` — in TWD
 - `expiresAt` — 15-minute TTL from creation
-- `reviewUrl` — give this URL to the human for confirmation
+- `confirmationMode: "originating_session"` — the draft returns to the original Clover screen for confirmation
 - `requiresHumanConfirmation: true` — always present
+
+If `sessionId` is omitted, the API creates a standalone compatibility draft with `confirmationMode: "review_url"` and a `reviewUrl` fallback.
 
 Same `requestId` returns the same draft — no duplicate drafts on retry.
 
@@ -180,13 +184,13 @@ GET /api/orders/:orderId
 
 The AI never confirms an order directly. The flow is:
 
-1. AI creates a draft → receives `reviewUrl`
-2. AI gives the `reviewUrl` to the human
-3. Human opens the URL — sees items, quantities, prices, total
-4. Human taps **「確認送出示範訂單」**
+1. The browser creates a session and keeps a browser-only confirmation credential
+2. AI creates a draft bound to that `sessionId`; no confirmation URL is exposed to the AI
+3. The original Clover screen displays items, quantities, prices, and total
+4. Human taps **Confirm order** on that screen
 5. Server revalidates: menu version, prices, availability, expiry, replay protection
 6. Order created with `orderId` and status `準備中`
-7. AI can query the order and report the number to the human
+7. The original screen displays the accepted order number and status
 
 ## Demonstration Security Boundaries
 
@@ -199,7 +203,7 @@ The AI never confirms an order directly. The flow is:
 
 - **No personal data accepted**: no card, payment token, address, phone, or AI conversation history
 - **Idempotency**: same `requestId` → same draft, no duplicates
-- **15-minute draft TTL** with an opaque approval token; repeated confirmation does not create a second order
+- **15-minute draft TTL** with a browser-only, HttpOnly confirmation credential for session-bound orders
 - **Price revalidated at confirmation** — price changes between draft and confirm are rejected
 
 > This is a hackathon demonstration. It does not provide production authentication, tenant isolation, or production access control, and must not receive real customer or payment data.

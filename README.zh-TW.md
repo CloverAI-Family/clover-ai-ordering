@@ -10,15 +10,15 @@
 
 **私人偏好與對話留在客戶的 AI 裡。餐廳端只接收完成點餐所需的桌號、品項、選項與確認結果。**
 
-## Hackathon 跨 AI 示範（已於現場完成）
+## 跨 AI 流程
 
-本作品已完成以下跨 AI 實測：
+目前的 session 綁定流程如下：
 
 1. 與餐廳系統分離的外部 AI 收到帶有本次 session 的 Agent URL
 2. 外部 AI 呼叫 `GET /api/menu?lang=zh`，讀取完整菜單
 3. 外部 AI 呼叫 `POST /api/drafts`，建立與該 session 綁定的草稿
 4. 外部 AI 把品項與伺服器計算的金額回報給使用者
-5. 使用者開啟 `reviewUrl`，檢查內容並確認送出
+5. 草稿自動出現在原本的 Clover 點餐畫面，由使用者檢查並確認送出
 6. 模擬餐廳訂單成立，原點餐畫面同步顯示訂單編號與狀態
 
 **這證明具備網路存取與 HTTP/JSON 工具能力的外部 AI，可以在不取得付款資料或私人對話的情況下協助完成點餐草稿。**
@@ -46,10 +46,11 @@
 │  POST /api/drafts         建立點餐草稿           │
 │  GET  /api/drafts/:id     查詢草稿狀態           │
 │  GET  /api/orders/:id     查詢已確認訂單         │
-│  GET  /review?draft=&token=  人工確認頁面        │
+│  POST /api/agent-sessions/:id/confirm            │
+│                           原畫面人工確認          │
 └──────────────────────────────────────────────────┘
         │
-        │  客戶點選確認（review 頁面）
+        │  客戶點選確認（原本點餐畫面）
         ▼
    模擬訂單成立  →  狀態：準備中
 ```
@@ -129,6 +130,7 @@ Content-Type: application/json
   "menuVersion": "2026-09-05-v1",
   "table": "1",
   "language": "zh",
+  "sessionId": "S_...",
   "lines": [
     { "itemId": 5, "quantity": 1, "optionKeys": [] },
     { "itemId": 6, "quantity": 1, "optionKeys": ["sugar0", "iceNone"] }
@@ -141,8 +143,10 @@ Content-Type: application/json
 - `lines` — 品項明細，含**伺服器計算**的價格（AI 不能自行設定價格）
 - `total` — 合計金額（TWD）
 - `expiresAt` — 15 分鐘有效期
-- `reviewUrl` — 把這個 URL 給客戶確認
+- `confirmationMode: "originating_session"` — 草稿回到原本的 Clover 畫面確認
 - `requiresHumanConfirmation: true` — 永遠為 true
+
+若省略 `sessionId`，API 會建立獨立的相容草稿，回傳 `confirmationMode: "review_url"` 與備援 `reviewUrl`。
 
 相同 `requestId` 重試會回傳同一份草稿，不會重複建立。
 
@@ -180,13 +184,13 @@ GET /api/orders/:orderId
 
 AI 不能直接確認訂單。流程如下：
 
-1. AI 建立草稿 → 收到 `reviewUrl`
-2. AI 把 `reviewUrl` 傳給客戶
-3. 客戶開啟頁面 — 看到品項、數量、價格、合計
-4. 客戶點選 **「確認送出示範訂單」**
+1. 瀏覽器建立 session，並保存只供該瀏覽器使用的確認憑證
+2. AI 建立綁定 `sessionId` 的草稿；AI 不會取得確認網址
+3. 原本的 Clover 畫面顯示品項、數量、價格與合計
+4. 客戶直接在該畫面點選 **「確認訂單」**
 5. 伺服器重驗：菜單版本、價格、供應狀態、有效期、防重複送出
 6. 訂單成立，取得 `orderId`，狀態為 `準備中`
-7. AI 查詢訂單，把編號回報給客戶
+7. 原本點餐畫面顯示已接受的訂單編號與狀態
 
 ## 示範安全邊界
 
@@ -199,7 +203,7 @@ AI 不能直接確認訂單。流程如下：
 
 - **不接受個人資料**：不接受信用卡、付款憑證、地址、電話或 AI 對話記錄
 - **冪等性**：相同 `requestId` 回傳相同草稿，不重複建立
-- **15 分鐘草稿有效期**，使用不透明確認 token；重複確認不會建立第二張訂單
+- **15 分鐘草稿有效期**，session 訂單使用只存在原瀏覽器、HttpOnly 的確認憑證
 - **確認時重驗價格** — 草稿建立到確認之間若價格變動，直接拒絕
 
 > 這是 Hackathon 示範系統，不具備正式帳號、租戶隔離或生產環境存取控制，不應接收真實顧客或付款資料。

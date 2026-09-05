@@ -31,9 +31,10 @@ function createAgentService({now=()=>Date.now(),ttlMs=15*60*1000}={}){
   function createSession(body={},baseUrl=''){
     const allowed=['table','language'];
     if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!allowed.includes(key)))throw new Error('invalid session schema');
-    const table=String(body.table||'1').slice(0,20),lang=language(body.language),createdAt=now(),expiresAt=createdAt+ttlMs,sessionId=`S_${crypto.randomBytes(18).toString('base64url')}`;
+    const table=String(body.table||'1').slice(0,20),lang=language(body.language),createdAt=now(),expiresAt=createdAt+ttlMs,sessionId=`S_${crypto.randomBytes(18).toString('base64url')}`,confirmationToken=crypto.randomBytes(24).toString('base64url');
     const session={sessionId,status:'waiting_for_agent',restaurantId:'clover-ai-ordering-demo',table,language:lang,createdAt:new Date(createdAt).toISOString(),expiresAt:new Date(expiresAt).toISOString(),agentUrl:`${baseUrl}/agent?restaurant=clover-ai-ordering-demo&table=${encodeURIComponent(table)}&lang=${encodeURIComponent(lang)}&session=${encodeURIComponent(sessionId)}`,statusUrl:`${baseUrl}/api/agent-sessions/${encodeURIComponent(sessionId)}`};
-    Object.defineProperty(session,'_expiresAt',{value:expiresAt,writable:false,enumerable:false});sessions.set(sessionId,session);return clone(session);
+    Object.defineProperties(session,{_expiresAt:{value:expiresAt,writable:false,enumerable:false},_confirmationToken:{value:confirmationToken,writable:false,enumerable:false}});sessions.set(sessionId,session);
+    const result=clone(session);Object.defineProperty(result,'_confirmationToken',{value:confirmationToken,writable:false,enumerable:false});return result;
   }
   function getSession(id){
     const session=sessions.get(id);if(!session)throw new Error('session not found');if(session.status!=='accepted'&&now()>session._expiresAt)session.status='expired';return clone(session);
@@ -61,7 +62,8 @@ function createAgentService({now=()=>Date.now(),ttlMs=15*60*1000}={}){
       return {itemId:item.id,name:item.names[lang],quantity:line.quantity,optionKeys,unitPrice,lineTotal:unitPrice*line.quantity};
     });
     const createdAt=now(),expiresAt=createdAt+ttlMs,draftId=`D${String(++draftSeq).padStart(4,'0')}`,approvalToken=crypto.randomBytes(18).toString('base64url');
-    const draft={draftId,requestId:body.requestId,status:'draft',restaurantId:'clover-ai-ordering-demo',table,menuVersion:MENU_VERSION,currency:CURRENCY,lines,total:lines.reduce((sum,line)=>sum+line.lineTotal,0),createdAt:new Date(createdAt).toISOString(),expiresAt:new Date(expiresAt).toISOString(),requiresHumanConfirmation:true,reviewUrl:`${baseUrl}/review?draft=${encodeURIComponent(draftId)}&token=${encodeURIComponent(approvalToken)}`};
+    const draft={draftId,requestId:body.requestId,status:'draft',restaurantId:'clover-ai-ordering-demo',table,menuVersion:MENU_VERSION,currency:CURRENCY,lines,total:lines.reduce((sum,line)=>sum+line.lineTotal,0),createdAt:new Date(createdAt).toISOString(),expiresAt:new Date(expiresAt).toISOString(),requiresHumanConfirmation:true,confirmationMode:session?'originating_session':'review_url'};
+    if(!session)draft.reviewUrl=`${baseUrl}/review?draft=${encodeURIComponent(draftId)}&token=${encodeURIComponent(approvalToken)}`;
     if(session)draft.sessionId=session.sessionId;
     Object.defineProperties(draft,{_approvalToken:{value:approvalToken,writable:false,enumerable:false},_expiresAt:{value:expiresAt,writable:false,enumerable:false}});drafts.set(draftId,draft);requests.set(body.requestId,draftId);
     if(session){session.status='awaiting_confirmation';session.draftId=draftId;session.total=draft.total;session.currency=CURRENCY;session.lines=clone(lines)}
@@ -75,9 +77,16 @@ function createAgentService({now=()=>Date.now(),ttlMs=15*60*1000}={}){
     if(draft.sessionId&&sessions.has(draft.sessionId)){const session=sessions.get(draft.sessionId);session.status='accepted';session.orderId=orderId;session.orderStatus='準備中';session.acceptedAt=draft.acceptedAt}
     return clone(draft);
   }
+  function confirmSession(id,token){
+    const session=sessions.get(id);if(!session)throw new Error('session not found');
+    if(typeof token!=='string'||token.length!==session._confirmationToken.length||!crypto.timingSafeEqual(Buffer.from(token),Buffer.from(session._confirmationToken)))throw new Error('invalid session confirmation');
+    if(session.status==='accepted')return getSession(id);
+    if(session.status!=='awaiting_confirmation'||!session.draftId)throw new Error('session has no draft to confirm');
+    confirmDraft(session.draftId,drafts.get(session.draftId)._approvalToken);return getSession(id);
+  }
   function getOrder(id){const order=orders.get(id);if(!order)throw new Error('order not found');return clone(order)}
   function listOrders(){return [...orders.values()].map(clone)}
-  return {publicMenu,createSession,getSession,createDraft,getDraft,confirmDraft,getOrder,listOrders,menuVersion:MENU_VERSION};
+  return {publicMenu,createSession,getSession,createDraft,getDraft,confirmDraft,confirmSession,getOrder,listOrders,menuVersion:MENU_VERSION};
 }
 
 module.exports={createAgentService,MENU_VERSION};

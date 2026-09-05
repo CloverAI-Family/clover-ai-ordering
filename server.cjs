@@ -10,7 +10,7 @@ const port = Number(process.env.PORT) || 8765;
 const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.cjs':'text/javascript; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.webp':'image/webp', '.svg':'image/svg+xml' };
 const service=createAgentService();
 const speech=createSpeechService();
-const json=(response,status,value)=>{response.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});response.end(JSON.stringify(value,null,2))};
+const json=(response,status,value,headers={})=>{response.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});response.end(JSON.stringify(value,null,2))};
 const html=(response,status,value)=>{response.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'"});response.end(value)};
 const escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const page=body=>`<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clover Agent Ordering</title><style>body{max-width:760px;margin:40px auto;padding:0 20px;background:#f2fbf5;color:#18352a;font:16px/1.65 system-ui}article{padding:22px;border:1px solid #b9d8c7;border-radius:20px;background:white}code,pre{background:#eef5f0;border-radius:8px}pre{padding:12px;overflow:auto}button{padding:12px 18px;border:0;border-radius:99px;background:#237a54;color:white;font-weight:800}a{color:#126747}li{margin:8px 0}</style><body>${body}</body></html>`;
@@ -20,12 +20,13 @@ const requestBaseUrl=request=>{
   return `${protocol}://${request.headers.host||'127.0.0.1:8765'}`;
 };
 function readJson(request){return new Promise((resolve,reject)=>{let raw='';request.on('data',chunk=>{raw+=chunk;if(Buffer.byteLength(raw)>16384){reject(Error('request too large'));request.destroy()}});request.on('end',()=>{try{resolve(JSON.parse(raw||'{}'))}catch{reject(Error('invalid JSON'))}});request.on('error',reject)})}
+const cookieValue=(request,name)=>String(request.headers.cookie||'').split(';').map(part=>part.trim()).find(part=>part.startsWith(`${name}=`))?.slice(name.length+1)||'';
 http.createServer(async (request, response) => {
   const baseUrl=requestBaseUrl(request),parsed=new URL(request.url,baseUrl),pathname=decodeURIComponent(parsed.pathname);
   try{
     if(request.method==='GET'&&pathname==='/agent'){
       const sessionId=parsed.searchParams.get('session')||'',sessionNote=sessionId?`<p>本次畫面識別碼：<code>${escapeHtml(sessionId)}</code>。建立草稿時必須在 JSON 加入同一個 <code>sessionId</code>，讓原畫面只追蹤這次點餐。</p>`:'<p>此網址沒有畫面識別碼；可以建立獨立草稿，但無法同步回原本的光球畫面。</p>';
-      return html(response,200,page(`<article><h1>Clover AI Agent 點餐入口</h1><p>這是給個人 AI 閱讀的標準 HTTP + JSON 示範介面。請先向使用者確認點餐意圖，再讀菜單、建立未送出的草稿，並把 <code>reviewUrl</code> 交給使用者本人確認。</p>${sessionNote}<ol><li><code>GET /api/menu?lang=${escapeHtml(parsed.searchParams.get('lang')||'zh')}</code> — 公開菜單</li><li><code>POST /api/drafts</code> — JSON: requestId, menuVersion, table, language, sessionId, lines[{itemId,quantity,optionKeys}]</li><li><code>GET /api/drafts/{draftId}</code> — 草稿與確認狀態</li><li><code>GET /api/orders/{orderId}</code> — 人工確認後的示範訂單</li></ol><p>Agent 不得提交價格、總額、付款或核准狀態。草稿不等於訂單。</p><p><a href="/api/menu?lang=${escapeHtml(parsed.searchParams.get('lang')||'zh')}">讀取 JSON 菜單</a></p></article>`));
+      return html(response,200,page(`<article><h1>Clover AI Agent 點餐入口</h1><p>這是給個人 AI 閱讀的標準 HTTP + JSON 示範介面。請先向使用者確認點餐意圖，再讀菜單並建立未送出的草稿。建立後請使用者回到原本的 Clover 點餐畫面確認，不要代替使用者確認。</p>${sessionNote}<ol><li><code>GET /api/menu?lang=${escapeHtml(parsed.searchParams.get('lang')||'zh')}</code> — 公開菜單</li><li><code>POST /api/drafts</code> — JSON: requestId, menuVersion, table, language, sessionId, lines[{itemId,quantity,optionKeys}]</li><li><code>GET /api/drafts/{draftId}</code> — 草稿與確認狀態</li><li><code>GET /api/orders/{orderId}</code> — 人工確認後的示範訂單</li></ol><p>Agent 不得提交價格、總額、付款或核准狀態。草稿不等於訂單。</p><p><a href="/api/menu?lang=${escapeHtml(parsed.searchParams.get('lang')||'zh')}">讀取 JSON 菜單</a></p></article>`));
     }
     if(request.method==='GET'&&pathname==='/api/menu')return json(response,200,service.publicMenu(parsed.searchParams.get('lang')));
     if(request.method==='POST'&&pathname==='/api/speech'){
@@ -35,8 +36,12 @@ http.createServer(async (request, response) => {
         return response.end(result.audio);
       }catch(error){return json(response,error.status||502,{error:error.message})}
     }
-    if(request.method==='POST'&&pathname==='/api/agent-sessions')return json(response,201,service.createSession(await readJson(request),baseUrl));
+    if(request.method==='POST'&&pathname==='/api/agent-sessions'){
+      const session=service.createSession(await readJson(request),baseUrl),secure=baseUrl.startsWith('https://')?'; Secure':'';
+      return json(response,201,session,{'Set-Cookie':`clover_confirmation_${session.sessionId}=${session._confirmationToken}; HttpOnly; SameSite=Strict; Max-Age=900; Path=/api/agent-sessions/${encodeURIComponent(session.sessionId)}/confirm${secure}`});
+    }
     const sessionMatch=pathname.match(/^\/api\/agent-sessions\/([A-Za-z0-9_-]+)$/);if(request.method==='GET'&&sessionMatch)return json(response,200,service.getSession(sessionMatch[1]));
+    const sessionConfirmMatch=pathname.match(/^\/api\/agent-sessions\/([A-Za-z0-9_-]+)\/confirm$/);if(request.method==='POST'&&sessionConfirmMatch)return json(response,200,service.confirmSession(sessionConfirmMatch[1],decodeURIComponent(cookieValue(request,`clover_confirmation_${sessionConfirmMatch[1]}`))));
     if(request.method==='POST'&&pathname==='/api/drafts')return json(response,201,service.createDraft(await readJson(request),baseUrl));
     const draftMatch=pathname.match(/^\/api\/drafts\/([A-Za-z0-9-]+)$/);if(request.method==='GET'&&draftMatch)return json(response,200,service.getDraft(draftMatch[1]));
     const orderMatch=pathname.match(/^\/api\/orders\/([A-Za-z0-9-]+)$/);if(request.method==='GET'&&orderMatch)return json(response,200,service.getOrder(orderMatch[1]));
