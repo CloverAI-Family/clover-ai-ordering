@@ -54,6 +54,10 @@ Customer's Personal AI (e.g., Claude, GPT, Gemini)
    Simulated order accepted  →  status: "準備中"
 ```
 
+## Demo
+
+- [Evaluation video: Clover AI Agent Ordering (1 min 35 sec)](https://www.youtube.com/watch?v=CUQ6OsLht7c)
+
 ## Quick Start
 
 **Requirements:** Node.js 18+, no build step, no dependencies to install

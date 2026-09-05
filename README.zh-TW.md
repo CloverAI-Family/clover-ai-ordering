@@ -54,6 +54,10 @@
    模擬訂單成立  →  狀態：準備中
 ```
 
+## 作品展示
+
+- [評選影片：Clover AI Agent 點餐系統（1 分 35 秒）](https://www.youtube.com/watch?v=CUQ6OsLht7c)
+
 ## 快速開始
 
 **環境需求：** Node.js 18 以上，無需 build，無需安裝額外套件
