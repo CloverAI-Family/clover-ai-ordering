@@ -58,7 +58,7 @@
 ## 作品展示
 
 - [線上展示：Clover AI 點餐系統](https://browsers-stephanie-although-mark.trycloudflare.com/?table=1&v=23)
-- [評選影片：Clover AI Agent 點餐系統（1 分 35 秒）](https://www.youtube.com/watch?v=CUQ6OsLht7c)
+- [評選影片：Clover AI Agent 點餐系統](https://youtube.com/shorts/EcsoLiQbS-c?si=tcKkxGN69DadQEf6)
 
 ## 快速開始
 
