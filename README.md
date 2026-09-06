@@ -57,6 +57,7 @@ Customer's Personal AI (e.g., Claude, GPT, Gemini)
 
 ## Demo
 
+- [Live demo: Clover AI Ordering](https://browsers-stephanie-although-mark.trycloudflare.com/?table=1&v=23)
 - [Evaluation video: Clover AI Agent Ordering (1 min 35 sec)](https://www.youtube.com/watch?v=CUQ6OsLht7c)
 
 ## Quick Start
